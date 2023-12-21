@@ -32,6 +32,18 @@
 #include <asm/thread_info.h>
 
 /*
+ * Stack pushing/popping (register pairs only). Equivalent to store decrement
+ * before, load increment after.
+ */
+	.macro	push, xreg1, xreg2
+	stp	\xreg1, \xreg2, [sp, # -16] !
+	.endm
+
+	.macro	pop, xreg1, xreg2
+	ldp	\xreg1, \xreg2, [sp], #16
+	.endm
+
+/*
  * Enable and disable interrupts.
  */
 	.macro	disable_irq
@@ -49,6 +61,18 @@
 
 	.macro	restore_irq, flags
 	msr	daif, \flags
+	.endm
+
+/*
+ * Save/disable and restore interrupts.
+ */
+	.macro	save_and_disable_irqs, olddaif
+	mrs	\olddaif, daif
+	disable_irq
+	.endm
+
+	.macro	restore_irqs, olddaif
+	msr	daif, \olddaif
 	.endm
 
 /*
@@ -467,10 +491,6 @@ alternative_endif
 	mrs	\rd, sp_el0
 	.endm
 
-	.macro	pte_to_phys, phys, pte
-	and	\phys, \pte, #(((1 << (48 - PAGE_SHIFT)) - 1) << PAGE_SHIFT)
-	.endm
-
 /*
  * Check the MIDR_EL1 of the current CPU for a given model and a range of
  * variant/revision. See asm/cputype.h for the macros used below.
@@ -508,6 +528,10 @@ alternative_endif
 	and		\res, \res, \tmp2
 	.endif
 .Ldone\@:
+	.endm
+
+	.macro	pte_to_phys, phys, pte
+	and	\phys, \pte, #(((1 << (48 - PAGE_SHIFT)) - 1) << PAGE_SHIFT)
 	.endm
 
 #endif	/* __ASM_ASSEMBLER_H */

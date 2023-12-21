@@ -42,6 +42,8 @@
 #include <linux/of_fdt.h>
 #include <linux/efi.h>
 #include <linux/psci.h>
+#include <linux/dma-mapping.h>
+#include <linux/platform_device.h>
 #include <linux/mm.h>
 
 #include <asm/acpi.h>
@@ -63,9 +65,23 @@
 #include <asm/efi.h>
 #include <asm/xen/hypervisor.h>
 #include <asm/mmu_context.h>
+#include <asm/system_misc.h>
+
+// [ SEC_SELINUX_PORTING_QUALCOMM
+#ifdef CONFIG_PROC_AVC
+#include <linux/proc_avc.h>
+#endif
+// ] SEC_SELINUX_PORTING_QUALCOMM
 
 phys_addr_t __fdt_pointer __initdata;
 
+unsigned int boot_reason;
+EXPORT_SYMBOL(boot_reason);
+
+unsigned int cold_boot;
+EXPORT_SYMBOL(cold_boot);
+
+const char *machine_name;
 /*
  * Standard memory resources
  */
@@ -177,6 +193,11 @@ static void __init smp_build_mpidr_hash(void)
 		pr_warn("Large number of MPIDR hash buckets detected\n");
 }
 
+const char * __init __weak arch_read_machine_name(void)
+{
+	return of_flat_dt_get_machine_name();
+}
+
 static void __init setup_machine_fdt(phys_addr_t dt_phys)
 {
 	void *dt_virt = fixmap_remap_fdt(dt_phys);
@@ -192,7 +213,11 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 			cpu_relax();
 	}
 
-	dump_stack_set_arch_desc("%s (DT)", of_flat_dt_get_machine_name());
+	machine_name = arch_read_machine_name();
+	if (machine_name) {
+		dump_stack_set_arch_desc("%s (DT)", machine_name);
+		pr_info("Machine: %s\n", machine_name);
+	}
 }
 
 static void __init request_standard_resources(void)
@@ -229,6 +254,8 @@ static void __init request_standard_resources(void)
 }
 
 u64 __cpu_logical_map[NR_CPUS] = { [0 ... NR_CPUS-1] = INVALID_HWID };
+
+void __init __weak init_random_pool(void) { }
 
 void __init setup_arch(char **cmdline_p)
 {
@@ -308,12 +335,15 @@ void __init setup_arch(char **cmdline_p)
 	conswitchp = &dummy_con;
 #endif
 #endif
+#ifndef CONFIG_RANDOMIZE_BASE
 	if (boot_args[1] || boot_args[2] || boot_args[3]) {
 		pr_err("WARNING: x1-x3 nonzero in violation of boot protocol:\n"
 			"\tx1: %016llx\n\tx2: %016llx\n\tx3: %016llx\n"
 			"This indicates a broken bootloader or old kernel\n",
 			boot_args[1], boot_args[2], boot_args[3]);
 	}
+#endif
+	init_random_pool();
 }
 
 static int __init topology_init(void)
@@ -331,7 +361,7 @@ static int __init topology_init(void)
 
 	return 0;
 }
-subsys_initcall(topology_init);
+postcore_initcall(topology_init);
 
 /*
  * Dump out kernel offset information on panic.
@@ -361,3 +391,9 @@ static int __init register_kernel_offset_dumper(void)
 	return 0;
 }
 __initcall(register_kernel_offset_dumper);
+
+void arch_setup_pdev_archdata(struct platform_device *pdev)
+{
+	pdev->archdata.dma_mask = DMA_BIT_MASK(32);
+	pdev->dev.dma_mask = &pdev->archdata.dma_mask;
+}

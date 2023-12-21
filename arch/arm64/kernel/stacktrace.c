@@ -25,6 +25,10 @@
 #include <asm/stack_pointer.h>
 #include <asm/stacktrace.h>
 
+#ifdef CONFIG_RKP_CFP_ROPP
+#include <linux/rkp_cfp.h>
+#endif
+
 /*
  * AArch64 PCS assigns the frame pointer to x29.
  *
@@ -43,6 +47,10 @@ int notrace unwind_frame(struct task_struct *tsk, struct stackframe *frame)
 	unsigned long high, low;
 	unsigned long fp = frame->fp;
 	unsigned long irq_stack_ptr;
+
+#ifdef CONFIG_RKP_CFP_ROPP
+	unsigned long old_pc = 0;
+#endif
 
 	if (!tsk)
 		tsk = current;
@@ -68,7 +76,16 @@ int notrace unwind_frame(struct task_struct *tsk, struct stackframe *frame)
 
 	frame->sp = fp + 0x10;
 	frame->fp = READ_ONCE_NOCHECK(*(unsigned long *)(fp));
+#ifdef CONFIG_RKP_CFP_ROPP
+	old_pc = READ_ONCE_NOCHECK(*(unsigned long *)(fp + 8));
+	if ((old_pc >> 40) != 0xffffff) {
+		frame->pc = ropp_enable_backtrace(old_pc, tsk); //not only current
+	} else {
+		frame->pc = old_pc;
+	}
+#else
 	frame->pc = READ_ONCE_NOCHECK(*(unsigned long *)(fp + 8));
+#endif
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	if (tsk->ret_stack &&
@@ -181,7 +198,8 @@ void save_stack_trace_regs(struct pt_regs *regs, struct stack_trace *trace)
 		trace->entries[trace->nr_entries++] = ULONG_MAX;
 }
 
-void save_stack_trace_tsk(struct task_struct *tsk, struct stack_trace *trace)
+static noinline void __save_stack_trace(struct task_struct *tsk,
+	struct stack_trace *trace, unsigned int nosched)
 {
 	struct stack_trace_data data;
 	struct stackframe frame;
@@ -191,17 +209,18 @@ void save_stack_trace_tsk(struct task_struct *tsk, struct stack_trace *trace)
 
 	data.trace = trace;
 	data.skip = trace->skip;
+	data.no_sched_functions = nosched;
 
 	if (tsk != current) {
-		data.no_sched_functions = 1;
 		frame.fp = thread_saved_fp(tsk);
 		frame.sp = thread_saved_sp(tsk);
 		frame.pc = thread_saved_pc(tsk);
 	} else {
-		data.no_sched_functions = 0;
+		/* We don't want this function nor the caller */
+		data.skip += 2;
 		frame.fp = (unsigned long)__builtin_frame_address(0);
 		frame.sp = current_stack_pointer;
-		frame.pc = (unsigned long)save_stack_trace_tsk;
+		frame.pc = (unsigned long)__save_stack_trace;
 	}
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	frame.graph = tsk->curr_ret_stack;
@@ -213,10 +232,17 @@ void save_stack_trace_tsk(struct task_struct *tsk, struct stack_trace *trace)
 
 	put_task_stack(tsk);
 }
+EXPORT_SYMBOL(save_stack_trace_tsk);
+
+void save_stack_trace_tsk(struct task_struct *tsk, struct stack_trace *trace)
+{
+	__save_stack_trace(tsk, trace, 1);
+}
 
 void save_stack_trace(struct stack_trace *trace)
 {
-	save_stack_trace_tsk(current, trace);
+	__save_stack_trace(current, trace, 0);
 }
+
 EXPORT_SYMBOL_GPL(save_stack_trace);
 #endif
