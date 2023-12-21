@@ -142,6 +142,9 @@ void tcp_time_wait(struct sock *sk, int state, int timeo);
 						 * most likely due to retrans in 3WHS.
 						 */
 
+/* Number of full MSS to receive before Acking RFC2581 */
+#define TCP_DELACK_SEG          1
+
 #define TCP_RESOURCE_PROBE_INTERVAL ((unsigned)(HZ/2U)) /* Maximal interval between probes
 					                 * for local resources.
 					                 */
@@ -274,8 +277,17 @@ extern int sysctl_tcp_invalid_ratelimit;
 extern int sysctl_tcp_pacing_ss_ratio;
 extern int sysctl_tcp_pacing_ca_ratio;
 extern int sysctl_tcp_default_init_rwnd;
+#ifdef CONFIG_NETPM
+extern int sysctl_tcp_netpm[4];
+extern struct net_device *ip6_dev_find(struct net *net, const struct in6_addr *addr);
+#endif
 
 extern atomic_long_t tcp_memory_allocated;
+
+/* sysctl variables for controlling various tcp parameters */
+extern int sysctl_tcp_delack_seg;
+extern int sysctl_tcp_use_userconfig;
+
 extern struct percpu_counter tcp_sockets_allocated;
 extern int tcp_memory_pressure;
 
@@ -366,6 +378,13 @@ ssize_t tcp_splice_read(struct socket *sk, loff_t *ppos,
 			struct pipe_inode_info *pipe, size_t len,
 			unsigned int flags);
 
+/* sysctl master controller */
+extern int tcp_use_userconfig_sysctl_handler(struct ctl_table *table,
+				int write, void __user *buffer, size_t *length,
+				loff_t *ppos);
+extern int tcp_proc_delayed_ack_control(struct ctl_table *table, int write,
+				void __user *buffer, size_t *length,
+				loff_t *ppos);
 void tcp_enter_quickack_mode(struct sock *sk, unsigned int max_quickacks);
 static inline void tcp_dec_quickack_mode(struct sock *sk,
 					 const unsigned int pkts)
@@ -1266,6 +1285,16 @@ void tcp_select_initial_window(int __space, __u32 mss, __u32 *rcv_wnd,
 			       __u32 *window_clamp, int wscale_ok,
 			       __u8 *rcv_wscale, __u32 init_rcv_wnd);
 
+#ifdef CONFIG_NETPM
+static inline int tcp_space_from_win(int win)
+{
+	return sysctl_tcp_adv_win_scale <= 0 ?
+			(win<<(-sysctl_tcp_adv_win_scale)) :
+			(win<<sysctl_tcp_adv_win_scale)/
+				((1<<sysctl_tcp_adv_win_scale)-1);
+}
+#endif
+
 static inline int tcp_win_from_space(int space)
 {
 	int tcp_adv_win_scale = sysctl_tcp_adv_win_scale;
@@ -1523,6 +1552,8 @@ struct tcp_fastopen_context {
 	struct rcu_head		rcu;
 };
 
+static inline void tcp_init_send_head(struct sock *sk);
+
 /* write queue abstraction */
 static inline void tcp_write_queue_purge(struct sock *sk)
 {
@@ -1530,6 +1561,7 @@ static inline void tcp_write_queue_purge(struct sock *sk)
 
 	while ((skb = __skb_dequeue(&sk->sk_write_queue)) != NULL)
 		sk_wmem_free_skb(sk, skb);
+	tcp_init_send_head(sk);
 	sk_mem_reclaim(sk);
 	tcp_clear_all_retrans_hints(tcp_sk(sk));
 	inet_csk(sk)->icsk_backoff = 0;
