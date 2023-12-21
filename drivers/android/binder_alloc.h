@@ -22,7 +22,14 @@
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
 #include <linux/list_lru.h>
+
+#ifdef CONFIG_ANDROID_BINDER_IPC_32BIT
+#define BINDER_IPC_32BIT 1
+#endif
+
 #include <uapi/linux/android/binder.h>
+
+#define BINDER_MIN_ALLOC (1 * PAGE_SIZE)
 
 extern struct list_lru binder_alloc_lru;
 struct binder_transaction;
