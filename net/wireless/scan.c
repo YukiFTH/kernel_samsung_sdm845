@@ -70,7 +70,7 @@ module_param(bss_entries_limit, int, 0644);
 MODULE_PARM_DESC(bss_entries_limit,
                  "limit to number of scan BSS entries (per wiphy, default 1000)");
 
-#define IEEE80211_SCAN_RESULT_EXPIRE	(7 * HZ)
+#define IEEE80211_SCAN_RESULT_EXPIRE	(30 * HZ)
 
 static void bss_free(struct cfg80211_internal_bss *bss)
 {
@@ -491,9 +491,19 @@ static int cmp_bss(struct cfg80211_bss *a,
 	const u8 *ie1 = NULL;
 	const u8 *ie2 = NULL;
 	int i, r;
-
+	#if !(defined(CONFIG_BCM4335) || defined(CONFIG_BCM4335_MODULE) \
+	|| defined(CONFIG_BCM4339) || defined(CONFIG_BCM4339_MODULE) \
+	|| defined(CONFIG_BCM43438) || defined(CONFIG_BCM43438_MODULE) \
+	|| defined(CONFIG_BCM43454) || defined(CONFIG_BCM43454_MODULE) \
+	|| defined(CONFIG_BCM43455) || defined(CONFIG_BCM43455_MODULE) \
+	|| defined(CONFIG_BCM4354) || defined(CONFIG_BCM4354_MODULE) \
+	|| defined(CONFIG_BCM4356) || defined(CONFIG_BCM4356_MODULE) \
+	|| defined(CONFIG_BCM4358) || defined(CONFIG_BCM4358_MODULE)\
+	|| defined(CONFIG_BCM4359) || defined(CONFIG_BCM4359_MODULE)\
+	|| defined(CONFIG_BCM4361) || defined(CONFIG_BCM4361_MODULE))
 	if (a->channel != b->channel)
 		return b->channel->center_freq - a->channel->center_freq;
+	#endif /* CONFIG_BCM43xx */
 
 	a_ies = rcu_access_pointer(a->ies);
 	if (!a_ies)
@@ -532,6 +542,20 @@ static int cmp_bss(struct cfg80211_bss *a,
 	r = memcmp(a->bssid, b->bssid, sizeof(a->bssid));
 	if (r)
 		return r;
+
+	#if (defined(CONFIG_BCM4335) || defined(CONFIG_BCM4335_MODULE) \
+	|| defined(CONFIG_BCM4339) || defined(CONFIG_BCM4339_MODULE) \
+	|| defined(CONFIG_BCM43438) || defined(CONFIG_BCM43438_MODULE) \
+	|| defined(CONFIG_BCM43454) || defined(CONFIG_BCM43454_MODULE) \
+	|| defined(CONFIG_BCM43455) || defined(CONFIG_BCM43455_MODULE) \
+	|| defined(CONFIG_BCM4354) || defined(CONFIG_BCM4354_MODULE) \
+	|| defined(CONFIG_BCM4356) || defined(CONFIG_BCM4356_MODULE) \
+	|| defined(CONFIG_BCM4358) || defined(CONFIG_BCM4358_MODULE)\
+	|| defined(CONFIG_BCM4359) || defined(CONFIG_BCM4359_MODULE)\
+	|| defined(CONFIG_BCM4361) || defined(CONFIG_BCM4361_MODULE))
+	if (a->channel != b->channel)
+		return b->channel->center_freq - a->channel->center_freq;
+	#endif /* CONFIG_BCM43xx */
 
 	ie1 = cfg80211_find_ie(WLAN_EID_SSID, a_ies->data, a_ies->len);
 	ie2 = cfg80211_find_ie(WLAN_EID_SSID, b_ies->data, b_ies->len);
@@ -904,6 +928,9 @@ cfg80211_bss_update(struct cfg80211_registered_device *rdev,
 		found->ts = tmp->ts;
 		found->ts_boottime = tmp->ts_boottime;
 		found->parent_tsf = tmp->parent_tsf;
+		found->pub.chains = tmp->pub.chains;
+		memcpy(found->pub.chain_signal, tmp->pub.chain_signal,
+		       IEEE80211_MAX_CHAINS);
 		ether_addr_copy(found->parent_bssid, tmp->parent_bssid);
 	} else {
 		struct cfg80211_internal_bss *new;
@@ -1196,6 +1223,8 @@ cfg80211_inform_bss_frame_data(struct wiphy *wiphy,
 	tmp.pub.capability = le16_to_cpu(mgmt->u.probe_resp.capab_info);
 	tmp.ts_boottime = data->boottime_ns;
 	tmp.parent_tsf = data->parent_tsf;
+	tmp.pub.chains = data->chains;
+	memcpy(tmp.pub.chain_signal, data->chain_signal, IEEE80211_MAX_CHAINS);
 	ether_addr_copy(tmp.parent_bssid, data->parent_bssid);
 
 	signal_valid = abs(data->chan->center_freq - channel->center_freq) <=
